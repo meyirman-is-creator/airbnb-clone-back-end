@@ -45,7 +45,7 @@ app.use(cookieParser());
 app.use("/uploads", express.static(__dirname + "/uploads"));
 app.use(cors({
   credentials: true,
-  origin: ["https://airbnb-clone-front-end.vercel.app","http://localhost:5173"],
+  origin: ["https://airbnb-clone-front-end.vercel.app","http://localhost:5173", "https://airbnb-clone-back-end-production.up.railway.app"],
 }));
 
 app.get("/test", (req, res) => {
@@ -66,14 +66,7 @@ app.post("/login", async (req, res) => {
           {},
           (err, token) => {
             if (err) throw err;
-            res.cookie("token", token,{ 
-              httpOnly: true, 
-              secure: true, 
-              maxAge: 3600000,
-              secure: process.env.NODE_ENV === 'production',
-              path: '/',
-              sameSite: 'Lax',
-            }).json(userDoc);
+            res.cookie("token", token).json(userDoc);
           }
         );
       } else {
