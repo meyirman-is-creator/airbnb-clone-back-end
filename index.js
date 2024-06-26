@@ -69,7 +69,8 @@ app.post("/login", async (req, res) => {
             res.cookie("token", token,{ 
               httpOnly: true, 
               secure: true, 
-              maxAge: 3600000 
+              maxAge: 3600000,
+              path: '/'
             }).json(userDoc);
           }
         );
