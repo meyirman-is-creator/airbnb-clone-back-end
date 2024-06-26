@@ -10,6 +10,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const session = require('express-session')
 
 // Проверка переменной окружения MONGO_URL
 if (!process.env.MONGO_URL) {
