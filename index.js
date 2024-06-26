@@ -18,10 +18,7 @@ if (!process.env.MONGO_URL) {
 }
 
 // Настройка подключения к MongoDB
-mongoose.connect(process.env.MONGO_URL, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => {
+mongoose.connect(process.env.MONGO_URL).then(() => {
   console.log("Подключение к MongoDB успешно установлено");
 }).catch((error) => {
   console.error("Ошибка подключения к MongoDB:", error);
@@ -48,7 +45,7 @@ app.use(cookieParser());
 app.use("/uploads", express.static(__dirname + "/uploads"));
 app.use(cors({
   credentials: true,
-  origin: "https://airbnb-clone-front-end.vercel.app" || "http://localhost:5173",
+  origin: ["https://airbnb-clone-front-end.vercel.app","http://localhost:5173"],
 }));
 
 app.get("/test", (req, res) => {
@@ -69,7 +66,11 @@ app.post("/login", async (req, res) => {
           {},
           (err, token) => {
             if (err) throw err;
-            res.cookie("token", token).json(userDoc);
+            res.cookie("token", token,{ 
+              httpOnly: true, 
+              secure: true, 
+              maxAge: 3600000 
+            }).json(userDoc);
           }
         );
       } else {
