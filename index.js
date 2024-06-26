@@ -41,13 +41,16 @@ app.use("/uploads", express.static(__dirname + "/uploads"));
 app.use(
   cors({
     credentials: true,
-    origin: ["http://localhost:5173", "https://airbnb-clone-front-end.vercel.app"],
+    origin: [
+      "http://localhost:5173",
+      "https://airbnb-clone-front-end.vercel.app",
+    ],
   })
 );
 
 app.get("/test", (req, res) => {
-  console.log("test")
-  
+  console.log("test");
+
   res.json("test ok");
 });
 
@@ -121,7 +124,7 @@ app.post("/upload", photosMiddleware.array("photos", 100), async (req, res) => {
       Bucket: process.env.S3_BUCKET_NAME,
       Key: `${Date.now()}_${file.originalname}`,
       Body: file.buffer,
-      ContentType: file.mimetype
+      ContentType: file.mimetype,
     };
 
     try {
@@ -141,7 +144,7 @@ app.post("/upload", photosMiddleware.array("photos", 100), async (req, res) => {
 app.post("/upload-by-link", async (req, res) => {
   try {
     const { link } = req.body;
-    const response = await axios.get(link, { responseType: 'arraybuffer' });
+    const response = await axios.get(link, { responseType: "arraybuffer" });
     const buffer = Buffer.from(response.data, "binary");
     const newName = `photo${Date.now()}.jpg`;
 
@@ -149,7 +152,7 @@ app.post("/upload-by-link", async (req, res) => {
       Bucket: process.env.S3_BUCKET_NAME,
       Key: newName,
       Body: buffer,
-      ContentType: response.headers["content-type"]
+      ContentType: response.headers["content-type"],
     };
 
     const command = new PutObjectCommand(params);
@@ -164,26 +167,12 @@ app.post("/upload-by-link", async (req, res) => {
 });
 
 app.post("/places", (req, res) => {
-  const { token } = req.cookies;
-  const {
-    title,
-    address,
-    addedPhotos,
-    description,
-    perks,
-    extraInfo,
-    checkIn,
-    checkOut,
-    maxGuests,
-    price,
-  } = req.body;
-  jwt.verify(token, jwtSecret, {}, async (err, userData) => {
-    if (err) throw err;
-    const placeDoc = await Place.create({
-      owner: userData.id,
+  try {
+    const { token } = req.cookies;
+    const {
       title,
       address,
-      photos: addedPhotos,
+      addedPhotos,
       description,
       perks,
       extraInfo,
@@ -191,9 +180,27 @@ app.post("/places", (req, res) => {
       checkOut,
       maxGuests,
       price,
+    } = req.body;
+    jwt.verify(token, jwtSecret, {}, async (err, userData) => {
+      if (err) throw err;
+      const placeDoc = await Place.create({
+        owner: userData.id,
+        title,
+        address,
+        photos: addedPhotos,
+        description,
+        perks,
+        extraInfo,
+        checkIn,
+        checkOut,
+        maxGuests,
+        price,
+      });
+      res.json(placeDoc);
     });
-    res.json(placeDoc);
-  });
+  } catch (err) {
+    console.log(err);
+  }
 });
 
 app.get("/user-places", (req, res) => {
@@ -241,12 +248,12 @@ app.put("/places", async (req, res) => {
         price,
       });
       await placeDoc.save();
-      res.json('ok');
+      res.json("ok");
     }
   });
 });
 
-app.get('/places', async (req, res) => {
+app.get("/places", async (req, res) => {
   res.json(await Place.find());
 });
 
