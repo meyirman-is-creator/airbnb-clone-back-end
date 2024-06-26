@@ -30,7 +30,7 @@ const s3 = new S3Client({
 });
 
 const app = express();
-const port = 4000;
+const port = process.env.PORT || 8080;
 
 const bcryptSalt = bcrypt.genSaltSync(10);
 const jwtSecret = "adfsqwefqdfasdfaf";
@@ -46,6 +46,8 @@ app.use(
 );
 
 app.get("/test", (req, res) => {
+  console.log("test")
+  
   res.json("test ok");
 });
 
