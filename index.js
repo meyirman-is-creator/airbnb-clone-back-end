@@ -70,7 +70,9 @@ app.post("/login", async (req, res) => {
               httpOnly: true, 
               secure: true, 
               maxAge: 3600000,
-              path: '/'
+              secure: process.env.NODE_ENV === 'production',
+              path: '/',
+              sameSite: 'Lax',
             }).json(userDoc);
           }
         );
