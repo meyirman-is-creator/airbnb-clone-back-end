@@ -48,7 +48,7 @@ app.use(cookieParser());
 app.use("/uploads", express.static(__dirname + "/uploads"));
 app.use(cors({
   credentials: true,
-  origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+  origin: "https://airbnb-clone-front-end.vercel.app" || "http://localhost:5173",
 }));
 
 app.get("/test", (req, res) => {
