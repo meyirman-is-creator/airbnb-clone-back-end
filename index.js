@@ -30,7 +30,7 @@ const s3 = new S3Client({
 });
 
 const app = express();
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 8080;
 
 const bcryptSalt = bcrypt.genSaltSync(10);
 const jwtSecret = "adfsqwefqdfasdfaf";
@@ -41,10 +41,7 @@ app.use("/uploads", express.static(__dirname + "/uploads"));
 app.use(
   cors({
     credentials: true,
-    origin: [
-      "http://localhost:5173",
-      "https://airbnb-clone-front-end.vercel.app",
-    ],
+    
   })
 );
 
