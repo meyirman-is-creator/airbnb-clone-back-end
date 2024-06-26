@@ -18,7 +18,15 @@ if (!process.env.MONGO_URL) {
 }
 
 // Настройка подключения к MongoDB
-mongoose.connect(process.env.MONGO_URL);
+mongoose.connect(process.env.MONGO_URL, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+}).then(() => {
+  console.log("Подключение к MongoDB успешно установлено");
+}).catch((error) => {
+  console.error("Ошибка подключения к MongoDB:", error);
+  process.exit(1);
+});
 
 // Настройка AWS S3
 const s3 = new S3Client({
@@ -45,7 +53,6 @@ app.use(cors({
 
 app.get("/test", (req, res) => {
   console.log("test");
-
   res.json("test ok");
 });
 
@@ -69,7 +76,7 @@ app.post("/login", async (req, res) => {
         res.status(422).json("pass not ok");
       }
     } else {
-      res.json("not found");
+      res.status(404).json("user not found");
     }
   } catch (error) {
     console.error("Ошибка в процессе логина:", error);
@@ -101,7 +108,7 @@ app.get("/profile", (req, res) => {
       res.json({ name, email, _id });
     });
   } else {
-    res.json(null);
+    res.status(401).json(null);
   }
 });
 
@@ -124,7 +131,7 @@ app.post("/upload", photosMiddleware.array("photos", 100), async (req, res) => {
 
     try {
       const command = new PutObjectCommand(params);
-      const data = await s3.send(command);
+      await s3.send(command);
       const fileUrl = `https://${params.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${params.Key}`;
       uploadFiles.push(fileUrl);
     } catch (err) {
@@ -151,7 +158,7 @@ app.post("/upload-by-link", async (req, res) => {
     };
 
     const command = new PutObjectCommand(params);
-    const data = await s3.send(command);
+    await s3.send(command);
     const fileUrl = `https://${params.Bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${params.Key}`;
 
     res.json(fileUrl);
@@ -195,25 +202,42 @@ app.post("/places", (req, res) => {
     });
   } catch (err) {
     console.log(err);
+    res.status(500).json({ error: "Ошибка создания места" });
   }
 });
 
 app.get("/user-places", (req, res) => {
   const { token } = req.cookies;
+  if (!token) {
+    return res.status(401).json({ error: "Требуется аутентификация" });
+  }
 
   jwt.verify(token, jwtSecret, {}, async (err, userData) => {
+    if (err) return res.status(401).json({ error: "Неверный токен" });
     const { id } = userData;
     res.json(await Place.find({ owner: id }));
   });
 });
 
 app.get("/places/:id", async (req, res) => {
-  const { id } = req.params;
-  res.json(await Place.findById(id));
+  try {
+    const { id } = req.params;
+    const place = await Place.findById(id);
+    if (!place) {
+      return res.status(404).json({ error: "Место не найдено" });
+    }
+    res.json(place);
+  } catch (err) {
+    res.status(500).json({ error: "Ошибка получения места" });
+  }
 });
 
 app.put("/places", async (req, res) => {
   const { token } = req.cookies;
+  if (!token) {
+    return res.status(401).json({ error: "Требуется аутентификация" });
+  }
+
   const {
     id,
     title,
@@ -228,8 +252,11 @@ app.put("/places", async (req, res) => {
     price,
   } = req.body;
   jwt.verify(token, jwtSecret, {}, async (err, userData) => {
-    if (err) throw err;
+    if (err) return res.status(401).json({ error: "Неверный токен" });
     const placeDoc = await Place.findById(id);
+    if (!placeDoc) {
+      return res.status(404).json({ error: "Место не найдено" });
+    }
     if (userData.id === placeDoc.owner.toString()) {
       placeDoc.set({
         title,
@@ -245,6 +272,8 @@ app.put("/places", async (req, res) => {
       });
       await placeDoc.save();
       res.json("ok");
+    } else {
+      res.status(403).json({ error: "Нет прав на редактирование" });
     }
   });
 });
