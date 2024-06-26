@@ -47,6 +47,18 @@ app.use(cors({
   credentials: true,
   origin: ["https://airbnb-clone-front-end.vercel.app","http://localhost:5173", "https://airbnb-clone-back-end-production.up.railway.app"],
 }));
+app.use(session({
+  secret: 'production', 
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+    maxAge: 3600000, // 1 hour
+    sameSite: 'strict'
+  }
+}));
+
 
 app.get("/test", (req, res) => {
   console.log("test");
@@ -71,7 +83,7 @@ app.post("/login", async (req, res) => {
               secure: process.env.NODE_ENV === 'production', 
               maxAge: 3600000, 
               path: '/',
-              sameSite: 'Lax'
+              sameSite: 'strict'
             }).json(userDoc);
           }
         );
