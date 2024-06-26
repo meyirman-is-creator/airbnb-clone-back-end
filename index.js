@@ -84,6 +84,7 @@ app.post("/login", async (req, res) => {
               secure: process.env.NODE_ENV === 'production', 
               maxAge: 3600000, 
               path: '/',
+              domain:"airbnb-clone-front-end.vercel.app",
               sameSite: 'Strict'
             }).json(userDoc);
           }
