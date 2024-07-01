@@ -50,9 +50,9 @@ app.use(
   cors({
     credentials: true,
     origin: [
-      "https://airbnb-clone-front-end.vercel.app",
+      "https://turamyzba-front-end.vercel.app",
       "http://localhost:5173",
-      "https://airbnb-clone-back-end-production.up.railway.app",
+      "https://turamyzba-back-end-production.up.railway.app",
     ],
   })
 );
