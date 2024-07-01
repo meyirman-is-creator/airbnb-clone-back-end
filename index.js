@@ -10,7 +10,8 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-const session = require('express-session')
+const session = require("express-session");
+const authMiddleware = require("./middlewares/auth-middleware.js");
 
 // Проверка переменной окружения MONGO_URL
 if (!process.env.MONGO_URL) {
@@ -18,13 +19,15 @@ if (!process.env.MONGO_URL) {
   process.exit(1);
 }
 
-// Настройка подключения к MongoDB
-mongoose.connect(process.env.MONGO_URL).then(() => {
-  console.log("Подключение к MongoDB успешно установлено");
-}).catch((error) => {
-  console.error("Ошибка подключения к MongoDB:", error);
-  process.exit(1);
-});
+mongoose
+  .connect(process.env.MONGO_URL)
+  .then(() => {
+    console.log("Подключение к MongoDB успешно установлено");
+  })
+  .catch((error) => {
+    console.error("Ошибка подключения к MongoDB:", error);
+    process.exit(1);
+  });
 
 // Настройка AWS S3
 const s3 = new S3Client({
@@ -39,28 +42,34 @@ const app = express();
 const port = process.env.PORT || 8080;
 
 const bcryptSalt = bcrypt.genSaltSync(10);
-const jwtSecret = "adfsqwefqdfasdfaf";
 
 app.use(express.json());
 app.use(cookieParser());
 app.use("/uploads", express.static(__dirname + "/uploads"));
-app.use(cors({
-  credentials: true,
-  origin: ["https://airbnb-clone-front-end.vercel.app","http://localhost:5173", "https://airbnb-clone-back-end-production.up.railway.app"],
-}));
-app.use(session({
-  secret: 'production', 
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-    maxAge: 3600000, // 1 hour
-    sameSite: process.env.NODE_ENV === 'production' ? 'Strict' : 'Lax'
-  }
-}));
-
-
+app.use(
+  cors({
+    credentials: true,
+    origin: [
+      "https://airbnb-clone-front-end.vercel.app",
+      "http://localhost:5173",
+      "https://airbnb-clone-back-end-production.up.railway.app",
+    ],
+  })
+);
+app.use(
+  session({
+    secret: "production",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production", // Use secure cookies in production
+      maxAge: 3600000, // 1 hour
+      sameSite: process.env.NODE_ENV === "production" ? "Strict" : "Lax",
+    },
+  })
+);
+const jwtSecret = 'adsflkjasdfadf'
 app.get("/test", (req, res) => {
   console.log("test");
   res.json("test ok");
@@ -74,19 +83,11 @@ app.post("/login", async (req, res) => {
       const passOk = bcrypt.compareSync(password, userDoc.password);
       if (passOk) {
         jwt.sign(
-          { email: userDoc.email, id: userDoc._id },
+          { email: userDoc.email, id: userDoc._id, name: userDoc.name },
           jwtSecret,
-          {},
           (err, token) => {
-            if (err) throw err;
-            res.cookie("token", token,{
-              httpOnly: true, 
-              secure: process.env.NODE_ENV === 'production', 
-              maxAge: 3600000, 
-              path: '/',
-              domain:"airbnb-clone-front-end.vercel.app",
-              sameSite: 'Strict'
-            }).json(userDoc);
+            console.log(token);
+            res.status(200).json({ accessToken: token });
           }
         );
       } else {
@@ -116,16 +117,13 @@ app.post("/register", async (req, res) => {
   }
 });
 
-app.get("/profile", (req, res) => {
-  const { token } = req.cookies;
-  if (token) {
-    jwt.verify(token, jwtSecret, {}, async (err, userData) => {
-      if (err) throw err;
-      const { name, email, _id } = await User.findById(userData.id);
-      res.json({ name, email, _id });
-    });
-  } else {
-    res.status(401).json(null);
+app.get("/profile", authMiddleware, (req, res) => {
+  const user = req.user;
+  try {
+    console.log(user)
+    res.json(user).status(200);
+  } catch (err) {
+    console.log(err);
   }
 });
 
@@ -185,13 +183,26 @@ app.post("/upload-by-link", async (req, res) => {
   }
 });
 
-app.post("/places", (req, res) => {
+app.post("/places", authMiddleware, async (req, res) => {
+  const user = req.user;
+  const {
+    title,
+    address,
+    addedPhotos,
+    description,
+    perks,
+    extraInfo,
+    checkIn,
+    checkOut,
+    maxGuests,
+    price,
+  } = req.body;
   try {
-    const { token } = req.cookies;
-    const {
+    const placeDoc = await Place.create({
+      owner: user.id,
       title,
       address,
-      addedPhotos,
+      photos: addedPhotos,
       description,
       perks,
       extraInfo,
@@ -199,41 +210,22 @@ app.post("/places", (req, res) => {
       checkOut,
       maxGuests,
       price,
-    } = req.body;
-    jwt.verify(token, jwtSecret, {}, async (err, userData) => {
-      if (err) throw err;
-      const placeDoc = await Place.create({
-        owner: userData.id,
-        title,
-        address,
-        photos: addedPhotos,
-        description,
-        perks,
-        extraInfo,
-        checkIn,
-        checkOut,
-        maxGuests,
-        price,
-      });
-      res.json(placeDoc);
     });
+    res.json(placeDoc);
   } catch (err) {
     console.log(err);
     res.status(500).json({ error: "Ошибка создания места" });
   }
 });
 
-app.get("/user-places", (req, res) => {
-  const { token } = req.cookies;
-  if (!token) {
-    return res.status(401).json({ error: "Требуется аутентификация" });
+app.get("/user-places", authMiddleware, async (req, res) => {
+  const {id} = req.user;
+  try {
+    res.status(200).json(await Place.find({ owner: id }));
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ messages: "Internal server error" });
   }
-
-  jwt.verify(token, jwtSecret, {}, async (err, userData) => {
-    if (err) return res.status(401).json({ error: "Неверный токен" });
-    const { id } = userData;
-    res.json(await Place.find({ owner: id }));
-  });
 });
 
 app.get("/places/:id", async (req, res) => {
@@ -249,12 +241,8 @@ app.get("/places/:id", async (req, res) => {
   }
 });
 
-app.put("/places", async (req, res) => {
-  const { token } = req.cookies;
-  if (!token) {
-    return res.status(401).json({ error: "Требуется аутентификация" });
-  }
-
+app.put("/places", authMiddleware, async (req, res) => {
+  const user = req.user;
   const {
     id,
     title,
@@ -268,13 +256,12 @@ app.put("/places", async (req, res) => {
     maxGuests,
     price,
   } = req.body;
-  jwt.verify(token, jwtSecret, {}, async (err, userData) => {
-    if (err) return res.status(401).json({ error: "Неверный токен" });
-    const placeDoc = await Place.findById(id);
-    if (!placeDoc) {
-      return res.status(404).json({ error: "Место не найдено" });
-    }
-    if (userData.id === placeDoc.owner.toString()) {
+  const placeDoc = await Place.findById(id);
+  if (!placeDoc) {
+    return res.status(404).json({ error: "Место не найдено" });
+  }
+  try {
+    if (user.id === placeDoc.owner.toString()) {
       placeDoc.set({
         title,
         address,
@@ -288,11 +275,12 @@ app.put("/places", async (req, res) => {
         price,
       });
       await placeDoc.save();
-      res.json("ok");
-    } else {
-      res.status(403).json({ error: "Нет прав на редактирование" });
+      res.status(200).json("ok");
     }
-  });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 app.get("/places", async (req, res) => {
