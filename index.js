@@ -52,7 +52,6 @@ app.use(
     origin: [
       "https://turamyzba-front-end.vercel.app",
       "http://localhost:5173",
-      "https://turamyzba-back-end-production.up.railway.app",
     ],
   })
 );
