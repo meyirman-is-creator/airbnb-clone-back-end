@@ -1,42 +1,35 @@
 const express = require("express");
 const cors = require("cors");
-require("dotenv").config();
-const multer = require("multer");
-const mongoose = require("mongoose");
-const axios = require("axios");
-const Place = require("./models/Place.js");
-const User = require("./models/User.js");
-const bcrypt = require("bcryptjs");
+
 const jwt = require("jsonwebtoken");
+const axios = require("axios");
+const bcrypt = require("bcryptjs");
+
+const multer = require("multer");
 const cookieParser = require("cookie-parser");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+
+const {PutObjectCommand } = require("@aws-sdk/client-s3");
+const { Client } = require("@googlemaps/google-maps-services-js");
 const session = require("express-session");
+
+const User = require("./models/User.js");
+const  FindRoommateModel = require('./models/FindRoommate.js');
+
 const authMiddleware = require("./middlewares/auth-middleware.js");
 
-// Проверка переменной окружения MONGO_URL
-if (!process.env.MONGO_URL) {
-  console.error("Отсутствует переменная окружения MONGO_URL");
-  process.exit(1);
-}
+const connectToDB = require("./db/mongoose-connection.js");
+const s3 = require('./services/s3-services.js')
 
-mongoose
-  .connect(process.env.MONGO_URL)
-  .then(() => {
-    console.log("Подключение к MongoDB успешно установлено");
-  })
-  .catch((error) => {
-    console.error("Ошибка подключения к MongoDB:", error);
-    process.exit(1);
-  });
+const AboutRoommateModel = require("./models/AboutRoommate.js");
 
-// Настройка AWS S3
-const s3 = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
+
+const OpenAI = require('openai')
+
+require("dotenv").config();
+const client = new Client({});
+
+connectToDB()
+
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -55,6 +48,7 @@ app.use(
     ],
   })
 );
+
 app.use(
   session({
     secret: "production",
@@ -68,6 +62,7 @@ app.use(
     },
   })
 );
+
 const jwtSecret = 'adsflkjasdfadf'
 app.get("/test", (req, res) => {
   console.log("test");
@@ -182,109 +177,327 @@ app.post("/upload-by-link", async (req, res) => {
   }
 });
 
-app.post("/places", authMiddleware, async (req, res) => {
+
+app.post("/findroommate-create", authMiddleware, async (req, res) => {
   const user = req.user;
   const {
     title,
     address,
     addedPhotos,
-    description,
-    perks,
-    extraInfo,
-    checkIn,
-    checkOut,
-    maxGuests,
-    price,
+    monthlyExpensePerPerson,
+    moveInStart,
+    utilityService,
+    deposit,
+    maxPeople,
+    apartmentInfo,
+    ownerInfo,
+    roomiePreferences,
+    contactNumber,
+    callPreference,
+    whatsappNumber,
   } = req.body;
+
   try {
-    const placeDoc = await Place.create({
-      owner: user.id,
-      title,
-      address,
-      photos: addedPhotos,
-      description,
-      perks,
-      extraInfo,
-      checkIn,
-      checkOut,
-      maxGuests,
-      price,
-    });
-    res.json(placeDoc);
+    const response = await axios.get(`https://catalog.api.2gis.com/3.0/items/geocode?q=Алматы ${address}&fields=items.point&key=${process.env.TWOGIS_API}`);
+    
+    if (response.data.result.items.length > 0) {
+      const location = response.data.result.items[0].point;
+      const coordinates = [location.lon, location.lat];
+      console.log(address, coordinates);
+
+      const roommateDoc = await FindRoommateModel.create({
+        owner: user.id,
+        title,
+        address: { address, coordinates },
+        photos: addedPhotos,
+        monthlyExpensePerPerson,
+        moveInStart,
+        utilityService,
+        deposit,
+        maxPeople,
+        apartmentInfo,
+        ownerInfo,
+        roomiePreferences,
+        contactNumber,
+        callPreference,
+        whatsappNumber,
+      });
+      res.json(roommateDoc);
+    } else {
+      res.status(400).json({ error: "Address not found" });
+    }
   } catch (err) {
     console.log(err);
-    res.status(500).json({ error: "Ошибка создания места" });
+    res.status(500).json({ error: "Error creating roommate listing" });
   }
 });
 
-app.get("/user-places", authMiddleware, async (req, res) => {
-  const {id} = req.user;
+
+app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
+  const user = req.user;
+  const roommateId = req.params.id;
+  const {
+    title,
+    address,
+    addedPhotos,
+    monthlyExpensePerPerson,
+    moveInStart,
+    utilityService,
+    deposit,
+    maxPeople,
+    apartmentInfo,
+    ownerInfo,
+    roomiePreferences,
+    contactNumber,
+    callPreference,
+    whatsappNumber,
+  } = req.body;
+
   try {
-    res.status(200).json(await Place.find({ owner: id }));
+    const response = await axios.get(`https://catalog.api.2gis.com/3.0/items/geocode?q=Алматы ${address}&key=${process.env.TWOGIS_API_KEY}`);
+    
+    if (response.data.result.items.length > 0) {
+      const location = response.data.result.items[0].point;
+      const coordinates = [location.lon, location.lat];
+      console.log(address, coordinates);
+
+      const updatedRoommate = await FindRoommateModel.findByIdAndUpdate(
+        roommateId,
+        {
+          owner: user.id,
+          title,
+          address: { address, coordinates },
+          photos: addedPhotos,
+          monthlyExpensePerPerson,
+          moveInStart,
+          utilityService,
+          deposit,
+          maxPeople,
+          apartmentInfo,
+          ownerInfo,
+          roomiePreferences,
+          contactNumber,
+          callPreference,
+          whatsappNumber,
+        },
+        { new: true, runValidators: true }
+      );
+
+      if (updatedRoommate) {
+        res.json(updatedRoommate);
+      } else {
+        res.status(404).json({ error: "Roommate listing not found" });
+      }
+    } else {
+      res.status(400).json({ error: "Address not found" });
+    }
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Error updating roommate listing" });
+  }
+});
+
+app.post("/aboutroommate-create", authMiddleware, async (req, res) => {
+  const user = req.user;
+  const {
+    active,
+    payment,
+    gender,
+    roomiesPreferences,
+    address,
+    moveInStart,
+    contactNumber,
+    callPreference,
+    whatsappNumber,
+  } = req.body;
+
+  try {
+    const roommateDoc = await AboutRoommateModel.create({
+      owner: user.id,
+      active,
+      payment,
+      gender,
+      roomiesPreferences,
+      address,
+      moveInStart,
+      contactNumber,
+      callPreference,
+      whatsappNumber,
+    });
+    res.json(roommateDoc);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Error creating roommate listing" });
+  }
+});
+
+app.put("/aboutroommate-update/:id", authMiddleware, async (req, res) => {
+  const user = req.user;
+  const roommateId = req.params.id;
+  const {
+    active,
+    payment,
+    gender,
+    roomiesPreferences,
+    address,
+    moveInStart,
+    contactNumber,
+    callPreference,
+    whatsappNumber,
+  } = req.body;
+
+  try {
+    const updatedRoommate = await AboutRoommateModel.findByIdAndUpdate(
+      roommateId,
+      {
+        owner: user.id,
+        active,
+        payment,
+        gender,
+        roomiesPreferences,
+        address,
+        moveInStart,
+        contactNumber,
+        callPreference,
+        whatsappNumber,
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (updatedRoommate) {
+      res.json(updatedRoommate);
+    } else {
+      res.status(404).json({ error: "Roommate listing not found" });
+    }
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Error updating roommate listing" });
+  }
+});
+
+app.get("/findroommate/:id",  async (req, res) => {
+  const roommateId = req.params.id;
+
+  try {
+    const roommate = await FindRoommateModel.findById(roommateId);
+    if (roommate) {
+      res.json(roommate);
+    } else {
+      res.status(404).json({ error: "Roommate listing not found" });
+    }
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Error retrieving roommate listing" });
+  }
+});
+
+app.get("/aboutroommate/:id",  async (req, res) => {
+  const roommateId = req.params.id;
+
+  try {
+    const roommate = await AboutRoommateModel.findById(roommateId);
+    if (roommate) {
+      res.json(roommate);
+    } else {
+      res.status(404).json({ error: "Roommate listing not found" });
+    }
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Error retrieving roommate listing" });
+  }
+});
+
+
+app.get("/my-announcements",authMiddleware, async (req, res) => {
+  const user = req.user;
+  try {
+    const myAnnounFindRoomate = await FindRoommateModel.find({ owner: user.id })
+    const myAnnounAboutRoomate = await AboutRoommateModel.find({ owner: user.id })
+    res.status(200).json({myAnnounFindRoomate, myAnnounAboutRoomate});
   } catch (err) {
     console.log(err);
     res.status(500).json({ messages: "Internal server error" });
   }
 });
 
-app.get("/places/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const place = await Place.findById(id);
-    if (!place) {
-      return res.status(404).json({ error: "Место не найдено" });
-    }
-    res.json(place);
-  } catch (err) {
-    res.status(500).json({ error: "Ошибка получения места" });
-  }
-});
+app.get("/findroommates",  async (req, res) => {
+  const { page = 1, limit = 100, search = "" } = req.query;
 
-app.put("/places", authMiddleware, async (req, res) => {
-  const user = req.user;
-  const {
-    id,
-    title,
-    address,
-    addedPhotos,
-    description,
-    perks,
-    extraInfo,
-    checkIn,
-    checkOut,
-    maxGuests,
-    price,
-  } = req.body;
-  const placeDoc = await Place.findById(id);
-  if (!placeDoc) {
-    return res.status(404).json({ error: "Место не найдено" });
-  }
   try {
-    if (user.id === placeDoc.owner.toString()) {
-      placeDoc.set({
-        title,
-        address,
-        photos: addedPhotos,
-        description,
-        perks,
-        extraInfo,
-        checkIn,
-        checkOut,
-        maxGuests,
-        price,
-      });
-      await placeDoc.save();
-      res.status(200).json("ok");
-    }
+    const query = search ? { title: { $regex: search, $options: "i" } } : {};
+    const roommates = await FindRoommateModel.find(query)
+      .skip((page - 1) * limit)
+      .limit(Number(limit));
+
+    const total = await FindRoommateModel.countDocuments(query);
+
+    res.json({
+      total,
+      page: Number(page),
+      limit: Number(limit),
+      data: roommates,
+    });
   } catch (err) {
     console.log(err);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Error retrieving roommate listings" });
   }
 });
 
-app.get("/places", async (req, res) => {
-  res.json(await Place.find());
+app.get("/aboutroommates",  async (req, res) => {
+  const { page = 1, limit = 100, search = "" } = req.query;
+
+  try {
+    const query = search ? { address: { $regex: search, $options: "i" } } : {};
+    const roommates = await AboutRoommateModel.find(query)
+      .skip((page - 1) * limit)
+      .limit(Number(limit));
+
+    const total = await AboutRoommateModel.countDocuments(query);
+
+    res.json({
+      total,
+      page: Number(page),
+      limit: Number(limit),
+      data: roommates,
+    });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Error retrieving roommate listings" });
+  }
 });
+
+app.get('/findroommates-search', authMiddleware, async (req, res) => {
+  const user = req.user;
+  const query = req.query.query
+  try {
+    const userAnceta = await AboutRoommateModel.findOne({ owner: user.id });
+    
+    if (!userAnceta) {
+      return res.status(404).send({ message: 'User anceta not found' });
+    }
+
+    const prompt = `I will give u user and announcements and  should analyze the announcements and find suitable announcements for the user. Resources : User: ${userAnceta} Announcements: ${await FindRoommateModel.find()}. The extra queries ${query}. WARNING RETURN JSON FORMAT FINDED ANNOUNCEMENTS ONLY JSON FORMAT`
+    console.log(query)
+    const openai = new OpenAI({
+      apiKey: process.env.CHAT_GPT_API
+    })
+    const openaiCompletion = await openai.chat.completions.create({
+                model: "gpt-3.5-turbo",
+                messages: [
+                    {role: "system", content: "You are a professional job analyzer."},
+                    {role: "user", content: prompt}
+                ],
+                temperature: 0
+            });
+    const aiResponse = openaiCompletion.choices[0].message.content;
+
+    res.json(JSON.parse(aiResponse))
+  } catch (err) {
+    console.log(err);
+    res.status(500).send({ message: 'An error occurred while processing your request' });
+  }
+});
+
 
 app.listen(port, () => {
   console.log(`Сервер запущен на порту ${port}`);
