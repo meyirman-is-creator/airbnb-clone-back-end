@@ -8,28 +8,26 @@ const bcrypt = require("bcryptjs");
 const multer = require("multer");
 const cookieParser = require("cookie-parser");
 
-const {PutObjectCommand } = require("@aws-sdk/client-s3");
+const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { Client } = require("@googlemaps/google-maps-services-js");
 const session = require("express-session");
 
 const User = require("./models/User.js");
-const  FindRoommateModel = require('./models/FindRoommate.js');
+const FindRoommateModel = require("./models/FindRoommate.js");
 
 const authMiddleware = require("./middlewares/auth-middleware.js");
 
 const connectToDB = require("./db/mongoose-connection.js");
-const s3 = require('./services/s3-services.js')
+const s3 = require("./services/s3-services.js");
 
 const AboutRoommateModel = require("./models/AboutRoommate.js");
 
-
-const OpenAI = require('openai')
+const OpenAI = require("openai");
 
 require("dotenv").config();
 const client = new Client({});
 
-connectToDB()
-
+connectToDB();
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -42,10 +40,7 @@ app.use("/uploads", express.static(__dirname + "/uploads"));
 app.use(
   cors({
     credentials: true,
-    origin: [
-      "https://turamyzba-front-end.vercel.app",
-      "http://localhost:5173",
-    ],
+    origin: ["https://turamyzba-front-end.vercel.app", "http://localhost:5173"],
   })
 );
 
@@ -63,7 +58,7 @@ app.use(
   })
 );
 
-const jwtSecret = 'adsflkjasdfadf'
+const jwtSecret = "adsflkjasdfadf";
 app.get("/test", (req, res) => {
   console.log("test");
   res.json("test ok");
@@ -114,7 +109,7 @@ app.post("/register", async (req, res) => {
 app.get("/profile", authMiddleware, (req, res) => {
   const user = req.user;
   try {
-    console.log(user)
+    console.log(user);
     res.json(user).status(200);
   } catch (err) {
     console.log(err);
@@ -177,7 +172,6 @@ app.post("/upload-by-link", async (req, res) => {
   }
 });
 
-
 app.post("/findroommate-create", authMiddleware, async (req, res) => {
   const user = req.user;
   const {
@@ -198,8 +192,10 @@ app.post("/findroommate-create", authMiddleware, async (req, res) => {
   } = req.body;
 
   try {
-    const response = await axios.get(`https://catalog.api.2gis.com/3.0/items/geocode?q=Алматы ${address}&fields=items.point&key=${process.env.TWOGIS_API}`);
-    
+    const response = await axios.get(
+      `https://catalog.api.2gis.com/3.0/items/geocode?q=Алматы ${address}&fields=items.point&key=${process.env.TWOGIS_API}`
+    );
+
     if (response.data.result.items.length > 0) {
       const location = response.data.result.items[0].point;
       const coordinates = [location.lon, location.lat];
@@ -232,7 +228,6 @@ app.post("/findroommate-create", authMiddleware, async (req, res) => {
   }
 });
 
-
 app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
   const user = req.user;
   const roommateId = req.params.id;
@@ -254,8 +249,10 @@ app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
   } = req.body;
 
   try {
-    const response = await axios.get(`https://catalog.api.2gis.com/3.0/items/geocode?q=Алматы ${address}&key=${process.env.TWOGIS_API_KEY}`);
-    
+    const response = await axios.get(
+      `https://catalog.api.2gis.com/3.0/items/geocode?q=Алматы ${address}&key=${process.env.TWOGIS_API_KEY}`
+    );
+
     if (response.data.result.items.length > 0) {
       const location = response.data.result.items[0].point;
       const coordinates = [location.lon, location.lat];
@@ -375,7 +372,7 @@ app.put("/aboutroommate-update/:id", authMiddleware, async (req, res) => {
   }
 });
 
-app.get("/findroommate/:id",  async (req, res) => {
+app.get("/findroommate/:id", async (req, res) => {
   const roommateId = req.params.id;
 
   try {
@@ -391,7 +388,7 @@ app.get("/findroommate/:id",  async (req, res) => {
   }
 });
 
-app.get("/aboutroommate/:id",  async (req, res) => {
+app.get("/aboutroommate/:id", async (req, res) => {
   const roommateId = req.params.id;
 
   try {
@@ -407,20 +404,23 @@ app.get("/aboutroommate/:id",  async (req, res) => {
   }
 });
 
-
-app.get("/my-announcements",authMiddleware, async (req, res) => {
+app.get("/my-announcements", authMiddleware, async (req, res) => {
   const user = req.user;
   try {
-    const myAnnounFindRoomate = await FindRoommateModel.find({ owner: user.id })
-    const myAnnounAboutRoomate = await AboutRoommateModel.find({ owner: user.id })
-    res.status(200).json({myAnnounFindRoomate, myAnnounAboutRoomate});
+    const myAnnounFindRoomate = await FindRoommateModel.find({
+      owner: user.id,
+    });
+    const myAnnounAboutRoomate = await AboutRoommateModel.find({
+      owner: user.id,
+    });
+    res.status(200).json({ myAnnounFindRoomate, myAnnounAboutRoomate });
   } catch (err) {
     console.log(err);
     res.status(500).json({ messages: "Internal server error" });
   }
 });
 
-app.get("/findroommates",  async (req, res) => {
+app.get("/findroommates", async (req, res) => {
   const { page = 1, limit = 100, search = "" } = req.query;
 
   try {
@@ -443,7 +443,7 @@ app.get("/findroommates",  async (req, res) => {
   }
 });
 
-app.get("/aboutroommates",  async (req, res) => {
+app.get("/aboutroommates", async (req, res) => {
   const { page = 1, limit = 100, search = "" } = req.query;
 
   try {
@@ -466,38 +466,94 @@ app.get("/aboutroommates",  async (req, res) => {
   }
 });
 
-app.get('/findroommates-search', authMiddleware, async (req, res) => {
+const fetchOpenAIData = async (prompt) => {
+  const openai = new OpenAI({
+    apiKey: process.env.CHAT_GPT_API,
+  });
+
+  let retries = 3;
+  while (retries > 0) {
+    try {
+      const openaiCompletion = await openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages: [
+          { role: "system", content: "You are a professional job analyzer." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0,
+      });
+
+      let aiResponse = openaiCompletion.choices[0].message.content;
+      console.log("AI Response:", aiResponse); // Отладочное сообщение
+
+      // Удаляем начальные и конечные символы ```json
+      aiResponse = aiResponse.replace(/```json/g, "").replace(/```/g, "");
+
+      return JSON.parse(aiResponse);
+    } catch (apiError) {
+      if (apiError.code === "insufficient_quota") {
+        console.error("OpenAI API quota exceeded:", apiError);
+        if (retries === 1) {
+          throw new Error(
+            "OpenAI API quota exceeded. Please check your plan and billing details."
+          );
+        }
+        await new Promise((res) => setTimeout(res, 3000)); // задержка перед повторной попыткой
+      } else {
+        throw apiError;
+      }
+    }
+    retries--;
+  }
+};
+
+app.get("/findroommates-search", authMiddleware, async (req, res) => {
   const user = req.user;
-  const query = req.query.query
+  const query = req.query.query;
+
   try {
-    const userAnceta = await AboutRoommateModel.findOne({ owner: user.id });
-    
+    const userAnceta = await FindRoommateModel.findOne({ owner: user.id });
+
     if (!userAnceta) {
-      return res.status(404).send({ message: 'User anceta not found' });
+      return res.status(404).send({ message: "User anceta not found" });
     }
 
-    const prompt = `I will give u user and announcements and  should analyze the announcements and find suitable announcements for the user. Resources : User: ${userAnceta} Announcements: ${await FindRoommateModel.find()}. The extra queries ${query}. WARNING RETURN JSON FORMAT FINDED ANNOUNCEMENTS ONLY JSON FORMAT`
-    console.log(query)
-    const openai = new OpenAI({
-      apiKey: process.env.CHAT_GPT_API
-    })
-    const openaiCompletion = await openai.chat.completions.create({
-                model: "gpt-3.5-turbo",
-                messages: [
-                    {role: "system", content: "You are a professional job analyzer."},
-                    {role: "user", content: prompt}
-                ],
-                temperature: 0
-            });
-    const aiResponse = openaiCompletion.choices[0].message.content;
+    const announcements = await FindRoommateModel.find();
+    const prompt = `
+      I will give you a user and announcements and you should analyze the announcements and find suitable announcements for the user.
+      Resources: User: ${JSON.stringify(
+        userAnceta
+      )}, Announcements: ${JSON.stringify(announcements)}.
+      The extra queries: ${query}. WARNING: RETURN JSON FORMAT ONLY FOR FOUND ANNOUNCEMENTS
+    `;
 
-    res.json(JSON.parse(aiResponse))
+    console.log("Prompt:", prompt); // Отладочное сообщение
+
+    try {
+      const aiResponse = await fetchOpenAIData(prompt);
+      res.json(aiResponse);
+    } catch (error) {
+      console.error("Error fetching data from OpenAI:", error);
+      if (error.message.includes("quota exceeded")) {
+        res
+          .status(429)
+          .send({
+            message:
+              "OpenAI API quota exceeded. Please check your plan and billing details.",
+          });
+      } else {
+        res
+          .status(500)
+          .send({ message: "An error occurred while processing your request" });
+      }
+    }
   } catch (err) {
-    console.log(err);
-    res.status(500).send({ message: 'An error occurred while processing your request' });
+    console.error("Server error:", err);
+    res
+      .status(500)
+      .send({ message: "An error occurred while processing your request" });
   }
 });
-
 
 app.listen(port, () => {
   console.log(`Сервер запущен на порту ${port}`);
