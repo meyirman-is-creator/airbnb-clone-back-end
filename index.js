@@ -396,6 +396,7 @@ app.get("/findroommate/:id", async (req, res) => {
   }
 });
 
+
 app.get("/aboutroommate/:id", async (req, res) => {
   const roommateId = req.params.id;
 
@@ -432,7 +433,7 @@ app.get("/findroommates", async (req, res) => {
   const { page = 1, limit = 40, search = "" } = req.query;
 
   try {
-    const query = search ? { title: { $regex: search, $options: "i" } } : {};
+    const query = search ? { title: { $regex: search, $options: "i" }, active: true } : { active: true };
     const roommates = await FindRoommateModel.find(query)
       .skip((page - 1) * limit)
       .limit(Number(limit));
@@ -450,6 +451,7 @@ app.get("/findroommates", async (req, res) => {
     res.status(500).json({ error: "Error retrieving roommate listings" });
   }
 });
+
 
 app.get("/aboutroommates", async (req, res) => {
   const { page = 1, limit = 100, search = "" } = req.query;
@@ -558,6 +560,59 @@ app.get("/findroommates-search", authMiddleware, async (req, res) => {
     res
       .status(500)
       .send({ message: "An error occurred while processing your request" });
+  }
+});
+
+app.put("/archive-announcement/:id", authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const updatedAnnouncement = await FindRoommateModel.findByIdAndUpdate(
+      id,
+      { active: false },
+      { new: true }
+    );
+    if (updatedAnnouncement) {
+      res.json(updatedAnnouncement);
+    } else {
+      res.status(404).json({ error: "Announcement not found" });
+    }
+  } catch (err) {
+    console.error("Error archiving announcement:", err);
+    res.status(500).json({ error: "Error archiving announcement" });
+  }
+});
+
+app.put("/restore-announcement/:id", authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const updatedAnnouncement = await FindRoommateModel.findByIdAndUpdate(
+      id,
+      { active: true },
+      { new: true }
+    );
+    if (updatedAnnouncement) {
+      res.json(updatedAnnouncement);
+    } else {
+      res.status(404).json({ error: "Announcement not found" });
+    }
+  } catch (err) {
+    console.error("Error restoring announcement:", err);
+    res.status(500).json({ error: "Error restoring announcement" });
+  }
+});
+
+app.delete("/delete-announcement/:id", authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const deletedAnnouncement = await FindRoommateModel.findByIdAndDelete(id);
+    if (deletedAnnouncement) {
+      res.json(deletedAnnouncement);
+    } else {
+      res.status(404).json({ error: "Announcement not found" });
+    }
+  } catch (err) {
+    console.error("Error deleting announcement:", err);
+    res.status(500).json({ error: "Error deleting announcement" });
   }
 });
 
