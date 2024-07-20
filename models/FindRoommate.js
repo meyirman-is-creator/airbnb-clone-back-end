@@ -20,6 +20,9 @@ const findRoommateSchema = new mongoose.Schema({
   contactNumber: { type: String, required: true },
   callPreference: { type: Boolean, default: false },
   whatsappNumber: { type: String },
+  whatsappNumberPreference: { type: Boolean, default: true },
+  selectedGender: { type: String, required: true },
+  communalServices: { type: Boolean, default: false },
 });
 
 const FindRoommateModel = mongoose.model("FindRoommate", findRoommateSchema);

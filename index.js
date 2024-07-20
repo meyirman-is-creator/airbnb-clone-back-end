@@ -189,11 +189,14 @@ app.post("/findroommate-create", authMiddleware, async (req, res) => {
     contactNumber,
     callPreference,
     whatsappNumber,
+    whatsappNumberPreference,
+    selectedGender,
+    communalServices
   } = req.body;
 
   try {
     const response = await axios.get(
-      `https://catalog.api.2gis.com/3.0/items/geocode?q=Алматы ${address}&fields=items.point&key=${process.env.TWOGIS_API}`
+      `https://catalog.api.2gis.com/3.0/items/geocode?q=${address}&fields=items.point&key=${process.env.TWOGIS_API}`
     );
 
     if (response.data.result.items.length > 0) {
@@ -217,6 +220,9 @@ app.post("/findroommate-create", authMiddleware, async (req, res) => {
         contactNumber,
         callPreference,
         whatsappNumber,
+        whatsappNumberPreference,
+        selectedGender,
+        communalServices
       });
       res.json(roommateDoc);
     } else {
@@ -228,9 +234,10 @@ app.post("/findroommate-create", authMiddleware, async (req, res) => {
   }
 });
 
+
 app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
+  const { id } = req.params;
   const user = req.user;
-  const roommateId = req.params.id;
   const {
     title,
     address,
@@ -246,11 +253,14 @@ app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
     contactNumber,
     callPreference,
     whatsappNumber,
+    whatsappNumberPreference,
+    selectedGender,
+    communalServices
   } = req.body;
 
   try {
     const response = await axios.get(
-      `https://catalog.api.2gis.com/3.0/items/geocode?q=Алматы ${address}&key=${process.env.TWOGIS_API_KEY}`
+      `https://catalog.api.2gis.com/3.0/items/geocode?q=${address}&fields=items.point&key=${process.env.TWOGIS_API}`
     );
 
     if (response.data.result.items.length > 0) {
@@ -258,8 +268,8 @@ app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
       const coordinates = [location.lon, location.lat];
       console.log(address, coordinates);
 
-      const updatedRoommate = await FindRoommateModel.findByIdAndUpdate(
-        roommateId,
+      const roommateDoc = await FindRoommateModel.findByIdAndUpdate(
+        id,
         {
           owner: user.id,
           title,
@@ -276,15 +286,13 @@ app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
           contactNumber,
           callPreference,
           whatsappNumber,
+          whatsappNumberPreference,
+          selectedGender,
+          communalServices,
         },
-        { new: true, runValidators: true }
+        { new: true }
       );
-
-      if (updatedRoommate) {
-        res.json(updatedRoommate);
-      } else {
-        res.status(404).json({ error: "Roommate listing not found" });
-      }
+      res.json(roommateDoc);
     } else {
       res.status(400).json({ error: "Address not found" });
     }
@@ -421,7 +429,7 @@ app.get("/my-announcements", authMiddleware, async (req, res) => {
 });
 
 app.get("/findroommates", async (req, res) => {
-  const { page = 1, limit = 100, search = "" } = req.query;
+  const { page = 1, limit = 40, search = "" } = req.query;
 
   try {
     const query = search ? { title: { $regex: search, $options: "i" } } : {};
@@ -535,12 +543,10 @@ app.get("/findroommates-search", authMiddleware, async (req, res) => {
     } catch (error) {
       console.error("Error fetching data from OpenAI:", error);
       if (error.message.includes("quota exceeded")) {
-        res
-          .status(429)
-          .send({
-            message:
-              "OpenAI API quota exceeded. Please check your plan and billing details.",
-          });
+        res.status(429).send({
+          message:
+            "OpenAI API quota exceeded. Please check your plan and billing details.",
+        });
       } else {
         res
           .status(500)
