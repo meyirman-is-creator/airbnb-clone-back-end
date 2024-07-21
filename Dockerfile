@@ -1,20 +1,12 @@
-# Используем официальный образ Node.js
-FROM node:16
+FROM node:14
 
-# Устанавливаем рабочую директорию в контейнере
-WORKDIR /app
+WORKDIR /usr/src/app
 
-# Копируем package.json и package-lock.json в рабочую директорию
 COPY package*.json ./
-
-# Устанавливаем зависимости
 RUN npm install
 
-# Копируем остальные файлы проекта в рабочую директорию
 COPY . .
 
-# Указываем порт, который будет использоваться
-EXPOSE 4000
+EXPOSE ${PORT}
 
-# Определяем команду для запуска приложения
-CMD ["node", "index.js"]
+CMD ["npx", "nodemon", "index.js"]
