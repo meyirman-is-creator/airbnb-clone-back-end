@@ -2501,6 +2501,11 @@ node-fetch@^2.6.7:
   dependencies:
     whatwg-url "^5.0.0"
 
+nodemailer@^6.9.14:
+  version "6.9.14"
+  resolved "https://registry.npmjs.org/nodemailer/-/nodemailer-6.9.14.tgz"
+  integrity sha512-Dobp/ebDKBvz91sbtRKhcznLThrKxKt97GI2FAlAyy+fk19j73Uz3sBXolVtmcXjaorivqsbbbjDY+Jkt4/bQA==
+
 nodemon@^3.1.3:
   version "3.1.3"
   resolved "https://registry.npmjs.org/nodemon/-/nodemon-3.1.3.tgz"

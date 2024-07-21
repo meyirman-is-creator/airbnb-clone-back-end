@@ -1,38 +1,59 @@
 const express = require("express");
 const cors = require("cors");
-
 const jwt = require("jsonwebtoken");
 const axios = require("axios");
 const bcrypt = require("bcryptjs");
-
 const multer = require("multer");
 const cookieParser = require("cookie-parser");
-
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const { Client } = require("@googlemaps/google-maps-services-js");
 const session = require("express-session");
+const nodemailer = require("nodemailer");
 
 const User = require("./models/User.js");
 const FindRoommateModel = require("./models/FindRoommate.js");
-
-const authMiddleware = require("./middlewares/auth-middleware.js");
-
-const connectToDB = require("./db/mongoose-connection.js");
-const s3 = require("./services/s3-services.js");
-
 const AboutRoommateModel = require("./models/AboutRoommate.js");
 
+const authMiddleware = require("./middlewares/auth-middleware.js");
+const connectToDB = require("./db/mongoose-connection.js");
+const s3 = require("./services/s3-services.js");
 const OpenAI = require("openai");
 
 require("dotenv").config();
 const client = new Client({});
-
 connectToDB();
 
 const app = express();
 const port = process.env.PORT || 8080;
-
 const bcryptSalt = bcrypt.genSaltSync(10);
+const jwtSecret = "adsflkjasdfadf";
+
+// Email Transporter
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+// Generate Token Function
+const generateToken = () => {
+  return Math.random().toString(36).substr(2, 8);
+};
+
+// Send Reset Email Function
+const sendResetEmail = async (email, token) => {
+  const resetLink = `http://localhost:5173/reset-password/${token}`;
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: 'Password Reset',
+    text: `You requested a password reset. Click the link to reset your password: ${resetLink}`,
+  };
+
+  await transporter.sendMail(mailOptions);
+};
 
 app.use(express.json());
 app.use(cookieParser());
@@ -43,7 +64,6 @@ app.use(
     origin: ["https://turamyzba-front-end.vercel.app", "http://localhost:5173"],
   })
 );
-
 app.use(
   session({
     secret: "production",
@@ -51,14 +71,13 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // Use secure cookies in production
-      maxAge: 3600000, // 1 hour
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 3600000,
       sameSite: process.env.NODE_ENV === "production" ? "Strict" : "Lax",
     },
   })
 );
 
-const jwtSecret = "adsflkjasdfadf";
 app.get("/test", (req, res) => {
   console.log("test");
   res.json("test ok");
@@ -92,27 +111,91 @@ app.post("/login", async (req, res) => {
 });
 
 app.post("/register", async (req, res) => {
-  const { name, email, password } = req.body;
+  const { fullName, nickName, email, password } = req.body;
   try {
     const userDoc = await User.create({
-      name,
+      fullName,
+      nickName,
       email,
       password: bcrypt.hashSync(password, bcryptSalt),
     });
-    res.json(userDoc);
+
+    jwt.sign(
+      { email: userDoc.email, id: userDoc._id, name: userDoc.fullName },
+      jwtSecret,
+      (err, token) => {
+        if (err) {
+          throw err;
+        }
+        res.status(200).json({ accessToken: token, userDoc });
+      }
+    );
   } catch (error) {
     console.error("Ошибка в процессе регистрации:", error);
     res.status(422).json(error);
   }
 });
 
-app.get("/profile", authMiddleware, (req, res) => {
-  const user = req.user;
+app.get("/profile", authMiddleware, async (req, res) => {
+  const userId = req.user.id;
+
   try {
-    console.log(user);
+    const user = await User.findById(userId, "fullName nickName email");
+    if (!user) {
+      return res.status(404).json({ error: "Пользователь не найден" });
+    }
     res.json(user).status(200);
   } catch (err) {
     console.log(err);
+    res.status(500).json({ error: "Ошибка при получении профиля пользователя" });
+  }
+});
+
+app.put("/edit-profile", authMiddleware, async (req, res) => {
+  const userId = req.user.id;
+  const { fullName, nickName, email } = req.body;
+
+  try {
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { fullName, nickName, email },
+      { new: true, runValidators: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: "Пользователь не найден" });
+    }
+
+    res.status(200).json({ message: "Профиль успешно обновлен", user });
+  } catch (err) {
+    console.error("Ошибка при обновлении профиля:", err);
+    res.status(500).json({ error: "Ошибка при обновлении профиля" });
+  }
+});
+
+app.put("/edit-password", authMiddleware, async (req, res) => {
+  const userId = req.user.id;
+  const { oldPassword, newPassword } = req.body;
+
+  try {
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ error: "Пользователь не найден" });
+    }
+
+    const passOk = bcrypt.compareSync(oldPassword, user.password);
+    if (!passOk) {
+      return res.status(400).json({ error: "Старый пароль неверен" });
+    }
+
+    user.password = bcrypt.hashSync(newPassword, bcryptSalt);
+    await user.save();
+
+    res.status(200).json({ message: "Пароль успешно изменен" });
+  } catch (err) {
+    console.error("Ошибка при изменении пароля:", err);
+    res.status(500).json({ error: "Ошибка при изменении пароля" });
   }
 });
 
@@ -233,7 +316,6 @@ app.post("/findroommate-create", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Error creating roommate listing" });
   }
 });
-
 
 app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
@@ -396,7 +478,6 @@ app.get("/findroommate/:id", async (req, res) => {
   }
 });
 
-
 app.get("/aboutroommate/:id", async (req, res) => {
   const roommateId = req.params.id;
 
@@ -452,7 +533,6 @@ app.get("/findroommates", async (req, res) => {
   }
 });
 
-
 app.get("/aboutroommates", async (req, res) => {
   const { page = 1, limit = 100, search = "" } = req.query;
 
@@ -494,7 +574,7 @@ const fetchOpenAIData = async (prompt) => {
       });
 
       let aiResponse = openaiCompletion.choices[0].message.content;
-      console.log("AI Response:", aiResponse); // Отладочное сообщение
+      console.log("AI Response:", aiResponse);
 
       // Удаляем начальные и конечные символы ```json
       aiResponse = aiResponse.replace(/```json/g, "").replace(/```/g, "");
@@ -508,7 +588,7 @@ const fetchOpenAIData = async (prompt) => {
             "OpenAI API quota exceeded. Please check your plan and billing details."
           );
         }
-        await new Promise((res) => setTimeout(res, 3000)); // задержка перед повторной попыткой
+        await new Promise((res) => setTimeout(res, 3000));
       } else {
         throw apiError;
       }
@@ -537,7 +617,7 @@ app.get("/findroommates-search", authMiddleware, async (req, res) => {
       The extra queries: ${query}. WARNING: RETURN JSON FORMAT ONLY FOR FOUND ANNOUNCEMENTS
     `;
 
-    console.log("Prompt:", prompt); // Отладочное сообщение
+    console.log("Prompt:", prompt);
 
     try {
       const aiResponse = await fetchOpenAIData(prompt);
@@ -613,6 +693,57 @@ app.delete("/delete-announcement/:id", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("Error deleting announcement:", err);
     res.status(500).json({ error: "Error deleting announcement" });
+  }
+});
+
+// Маршрут для запроса сброса пароля
+app.post("/request-reset-password", async (req, res) => {
+  const { email } = req.body;
+  const token = generateToken();
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    user.resetToken = token;
+    user.resetTokenExpiration = Date.now() + 3600000;
+    await user.save();
+
+    await sendResetEmail(email, token);
+
+    res.status(200).json({ message: 'Токен для сброса пароля отправлен на вашу почту' });
+  } catch (err) {
+    res.status(500).json({ error: err });
+  }
+});
+
+// Маршрут для сброса пароля
+app.post('/reset-password', async (req, res) => {
+  const { token, newPassword } = req.body;
+
+  try {
+    // Поиск пользователя по токену и проверка срока действия токена
+    const user = await User.findOne({
+      resetToken: token,
+      resetTokenExpiration: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: 'Неверный или истекший токен' });
+    }
+
+    // Обновление пароля и сброс токена
+    user.password = bcrypt.hashSync(newPassword, 10);
+    user.resetToken = undefined;
+    user.resetTokenExpiration = undefined;
+    await user.save();
+
+    res.status(200).json({ message: 'Пароль успешно сброшен' });
+  } catch (err) {
+    console.error("Ошибка при сбросе пароля:", err);
+    res.status(500).json({ error: 'Ошибка при сбросе пароля' });
   }
 });
 
