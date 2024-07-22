@@ -26,7 +26,7 @@ connectToDB();
 const app = express();
 const port = process.env.PORT || 8080;
 const bcryptSalt = bcrypt.genSaltSync(10);
-const jwtSecret = "adsflkjasdfadf";
+const jwtSecret = process.env.JWT_SECRET || "default_secret"; // Используйте переменные окружения
 
 // Email Transporter
 const transporter = nodemailer.createTransport({
@@ -66,7 +66,7 @@ app.use(
 );
 app.use(
   session({
-    secret: "production",
+    secret: process.env.SESSION_SECRET || "default_session_secret",
     resave: false,
     saveUninitialized: false,
     cookie: {
