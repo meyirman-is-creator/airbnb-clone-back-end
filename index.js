@@ -26,7 +26,7 @@ connectToDB();
 const app = express();
 const port = process.env.PORT || 8080;
 const bcryptSalt = bcrypt.genSaltSync(10);
-const jwtSecret = process.env.JWT_SECRET || "default_secret"; // Используйте переменные окружения
+const jwtSecret = process.env.JWT_SECRET || "adsflkjasdfadf"; // Используйте переменные окружения
 
 // Email Transporter
 const transporter = nodemailer.createTransport({
@@ -37,19 +37,18 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Generate Token Function
-const generateToken = () => {
-  return Math.random().toString(36).substr(2, 8);
+// Generate Verification Code Function
+const generateVerificationCode = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// Send Reset Email Function
-const sendResetEmail = async (email, token) => {
-  const resetLink = `http://localhost:5173/reset-password/${token}`;
+// Send Verification Email Function
+const sendVerificationEmail = async (email, code) => {
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: email,
-    subject: 'Password Reset',
-    text: `You requested a password reset. Click the link to reset your password: ${resetLink}`,
+    subject: 'Код для подтверждения регистрации',
+    text: `Ваш код для подтверждения регистрации: ${code}. Если вы не запрашивали регистрацию, просто игнорируйте это письмо.`,
   };
 
   await transporter.sendMail(mailOptions);
@@ -83,6 +82,7 @@ app.get("/test", (req, res) => {
   res.json("test ok");
 });
 
+// Login Endpoint
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -90,19 +90,16 @@ app.post("/login", async (req, res) => {
     if (userDoc) {
       const passOk = bcrypt.compareSync(password, userDoc.password);
       if (passOk) {
-        jwt.sign(
+        const token = jwt.sign(
           { email: userDoc.email, id: userDoc._id, name: userDoc.name },
-          jwtSecret,
-          (err, token) => {
-            console.log(token);
-            res.status(200).json({ accessToken: token });
-          }
+          jwtSecret
         );
+        res.status(200).json({ accessToken: token });
       } else {
-        res.status(422).json("pass not ok");
+        res.status(422).json("Неверный пароль");
       }
     } else {
-      res.status(404).json("user not found");
+      res.status(404).json("Пользователь не найден");
     }
   } catch (error) {
     console.error("Ошибка в процессе логина:", error);
@@ -110,32 +107,60 @@ app.post("/login", async (req, res) => {
   }
 });
 
+// Register Endpoint
 app.post("/register", async (req, res) => {
   const { fullName, nickName, email, password } = req.body;
+  const verificationCode = generateVerificationCode();
   try {
-    const userDoc = await User.create({
+    const userDoc = new User({
       fullName,
       nickName,
       email,
       password: bcrypt.hashSync(password, bcryptSalt),
+      resetToken: verificationCode,
+      resetTokenExpiration: Date.now() + 3600000, // 1 hour
     });
 
-    jwt.sign(
-      { email: userDoc.email, id: userDoc._id, name: userDoc.fullName },
-      jwtSecret,
-      (err, token) => {
-        if (err) {
-          throw err;
-        }
-        res.status(200).json({ accessToken: token, userDoc });
-      }
-    );
+    await sendVerificationEmail(email, verificationCode);
+    await userDoc.save();
+    res.status(200).json({ message: 'Пользователь зарегистрирован, проверьте свою почту для верификации.', email });
   } catch (error) {
     console.error("Ошибка в процессе регистрации:", error);
     res.status(422).json(error);
   }
 });
 
+// Verify Code Endpoint
+app.post("/verify-code", async (req, res) => {
+  const { email, code } = req.body;
+  try {
+    const user = await User.findOne({
+      email,
+      resetToken: code,
+      resetTokenExpiration: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: 'Неверный или истекший код' });
+    }
+
+    user.resetToken = undefined;
+    user.resetTokenExpiration = undefined;
+    await user.save();
+
+    const token = jwt.sign(
+      { email: user.email, id: user._id, name: user.fullName },
+      jwtSecret
+    );
+
+    res.status(200).json({ message: 'Код подтвержден', accessToken: token });
+  } catch (err) {
+    console.error("Ошибка при проверке кода верификации:", err);
+    res.status(500).json({ error: 'Ошибка при проверке кода верификации' });
+  }
+});
+
+// Profile Endpoint
 app.get("/profile", authMiddleware, async (req, res) => {
   const userId = req.user.id;
 
@@ -151,6 +176,7 @@ app.get("/profile", authMiddleware, async (req, res) => {
   }
 });
 
+// Edit Profile Endpoint
 app.put("/edit-profile", authMiddleware, async (req, res) => {
   const userId = req.user.id;
   const { fullName, nickName, email } = req.body;
@@ -173,6 +199,7 @@ app.put("/edit-profile", authMiddleware, async (req, res) => {
   }
 });
 
+// Edit Password Endpoint
 app.put("/edit-password", authMiddleware, async (req, res) => {
   const userId = req.user.id;
   const { oldPassword, newPassword } = req.body;
@@ -199,12 +226,15 @@ app.put("/edit-password", authMiddleware, async (req, res) => {
   }
 });
 
+// Logout Endpoint
 app.post("/logout", (req, res) => {
   res.cookie("token", "").json(true);
 });
 
+// File Upload Middleware
 const photosMiddleware = multer({ storage: multer.memoryStorage() });
 
+// Upload Endpoint
 app.post("/upload", photosMiddleware.array("photos", 100), async (req, res) => {
   const uploadFiles = [];
   for (let i = 0; i < req.files.length; i++) {
@@ -230,6 +260,7 @@ app.post("/upload", photosMiddleware.array("photos", 100), async (req, res) => {
   res.json(uploadFiles);
 });
 
+// Upload By Link Endpoint
 app.post("/upload-by-link", async (req, res) => {
   try {
     const { link } = req.body;
@@ -255,6 +286,7 @@ app.post("/upload-by-link", async (req, res) => {
   }
 });
 
+// Find Roommate Create Endpoint
 app.post("/findroommate-create", authMiddleware, async (req, res) => {
   const user = req.user;
   const {
@@ -317,6 +349,7 @@ app.post("/findroommate-create", authMiddleware, async (req, res) => {
   }
 });
 
+// Find Roommate Update Endpoint
 app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
   const user = req.user;
@@ -384,6 +417,7 @@ app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// About Roommate Create Endpoint
 app.post("/aboutroommate-create", authMiddleware, async (req, res) => {
   const user = req.user;
   const {
@@ -418,6 +452,7 @@ app.post("/aboutroommate-create", authMiddleware, async (req, res) => {
   }
 });
 
+// About Roommate Update Endpoint
 app.put("/aboutroommate-update/:id", authMiddleware, async (req, res) => {
   const user = req.user;
   const roommateId = req.params.id;
@@ -462,6 +497,7 @@ app.put("/aboutroommate-update/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// Find Roommate By ID Endpoint
 app.get("/findroommate/:id", async (req, res) => {
   const roommateId = req.params.id;
 
@@ -478,6 +514,7 @@ app.get("/findroommate/:id", async (req, res) => {
   }
 });
 
+// About Roommate By ID Endpoint
 app.get("/aboutroommate/:id", async (req, res) => {
   const roommateId = req.params.id;
 
@@ -494,6 +531,7 @@ app.get("/aboutroommate/:id", async (req, res) => {
   }
 });
 
+// My Announcements Endpoint
 app.get("/my-announcements", authMiddleware, async (req, res) => {
   const user = req.user;
   try {
@@ -510,6 +548,7 @@ app.get("/my-announcements", authMiddleware, async (req, res) => {
   }
 });
 
+// Find Roommates Endpoint
 app.get("/findroommates", async (req, res) => {
   const { page = 1, limit = 40, search = "" } = req.query;
 
@@ -533,6 +572,7 @@ app.get("/findroommates", async (req, res) => {
   }
 });
 
+// About Roommates Endpoint
 app.get("/aboutroommates", async (req, res) => {
   const { page = 1, limit = 100, search = "" } = req.query;
 
@@ -556,6 +596,7 @@ app.get("/aboutroommates", async (req, res) => {
   }
 });
 
+// Fetch OpenAI Data
 const fetchOpenAIData = async (prompt) => {
   const openai = new OpenAI({
     apiKey: process.env.CHAT_GPT_API,
@@ -597,6 +638,7 @@ const fetchOpenAIData = async (prompt) => {
   }
 };
 
+// Find Roommates Search Endpoint
 app.get("/findroommates-search", authMiddleware, async (req, res) => {
   const user = req.user;
   const query = req.query.query;
@@ -643,6 +685,7 @@ app.get("/findroommates-search", authMiddleware, async (req, res) => {
   }
 });
 
+// Archive Announcement Endpoint
 app.put("/archive-announcement/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
   try {
@@ -662,6 +705,7 @@ app.put("/archive-announcement/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// Restore Announcement Endpoint
 app.put("/restore-announcement/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
   try {
@@ -681,6 +725,7 @@ app.put("/restore-announcement/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// Delete Announcement Endpoint
 app.delete("/delete-announcement/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
   try {
@@ -699,7 +744,7 @@ app.delete("/delete-announcement/:id", authMiddleware, async (req, res) => {
 // Маршрут для запроса сброса пароля
 app.post("/request-reset-password", async (req, res) => {
   const { email } = req.body;
-  const token = generateToken();
+  const verificationCode = generateVerificationCode();
 
   try {
     const user = await User.findOne({ email });
@@ -707,34 +752,62 @@ app.post("/request-reset-password", async (req, res) => {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
-    user.resetToken = token;
-    user.resetTokenExpiration = Date.now() + 3600000;
+    user.resetToken = verificationCode;
+    user.resetTokenExpiration = Date.now() + 3600000; // 1 час
     await user.save();
 
-    await sendResetEmail(email, token);
+    console.log(`User ${email} reset token: ${verificationCode}`);
 
-    res.status(200).json({ message: 'Токен для сброса пароля отправлен на вашу почту' });
+    await sendVerificationEmail(email, verificationCode);
+
+    res.status(200).json({ message: 'Код для сброса пароля отправлен на вашу почту' });
   } catch (err) {
     res.status(500).json({ error: err });
   }
 });
 
-// Маршрут для сброса пароля
-app.post('/reset-password', async (req, res) => {
-  const { token, newPassword } = req.body;
+
+// Маршрут для верификации кода сброса пароля
+app.post("/verify-reset-code", async (req, res) => {
+  const { email, code } = req.body;
 
   try {
-    // Поиск пользователя по токену и проверка срока действия токена
     const user = await User.findOne({
-      resetToken: token,
+      email,
+      resetToken: code,
       resetTokenExpiration: { $gt: Date.now() },
     });
-
     if (!user) {
-      return res.status(400).json({ error: 'Неверный или истекший токен' });
+      return res.status(400).json({ error: 'Неверный или истекший код' });
     }
 
-    // Обновление пароля и сброс токена
+    res.status(200).json({ message: 'Код подтвержден' });
+  } catch (err) {
+    console.error("Ошибка при проверке кода сброса пароля:", err);
+    res.status(500).json({ error: 'Ошибка при проверке кода сброса пароля' });
+  }
+});
+
+
+// Маршрут для сброса пароля
+app.post('/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body;
+
+  console.log(`Email: ${email}, Code: ${code}, New Password: ${newPassword}`);
+
+  try {
+    const user = await User.findOne({
+      email,
+      resetToken: code,
+      resetTokenExpiration: { $gt: Date.now() },
+    });
+    console.log(user)
+    if (!user) {
+      console.log("User not found or token expired");
+      console.log(`Expected token: ${code}, Current tokens: ${user ? user.resetToken : 'No user found'}`);
+      return res.status(400).json({ error: 'Неверный или истекший код' });
+    }
+    
     user.password = bcrypt.hashSync(newPassword, 10);
     user.resetToken = undefined;
     user.resetTokenExpiration = undefined;
@@ -746,6 +819,8 @@ app.post('/reset-password', async (req, res) => {
     res.status(500).json({ error: 'Ошибка при сбросе пароля' });
   }
 });
+
+
 
 app.listen(port, () => {
   console.log(`Сервер запущен на порту ${port}`);

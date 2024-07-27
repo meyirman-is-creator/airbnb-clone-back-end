@@ -1,6 +1,7 @@
+
 const jwt = require("jsonwebtoken");
 
-const jwtSecret = "adsflkjasdfadf";
+const jwtSecret = process.env.JWT_SECRET || "adsflkjasdfadf"; // Используйте переменные окружения
 
 const authMiddleware = (req, res, next) => {
   // Извлечение заголовка авторизации
@@ -24,7 +25,7 @@ const authMiddleware = (req, res, next) => {
     // Сохранение полезной нагрузки токена в запросе
     req.user = payload;
     // Переход к следующему обработчику
-    next(); 
+    next();
   } catch (err) {
     console.error("Token verification error:", err);
     return res.status(401).json({ message: "Unauthorized: Invalid token" });
