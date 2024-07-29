@@ -28,31 +28,47 @@ const port = process.env.PORT || 8080;
 const bcryptSalt = bcrypt.genSaltSync(10);
 const jwtSecret = process.env.JWT_SECRET || "adsflkjasdfadf"; // Используйте переменные окружения
 
+// Temporary store for verification codes
+const verificationStore = new Map();
+
 // Email Transporter
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
 });
 
-// Generate Verification Code Function
-const generateVerificationCode = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-};
-
 // Send Verification Email Function
-const sendVerificationEmail = async (email, code) => {
+const sendVerificationEmail = async (email, code, type) => {
+  const subject =
+    type === "passwordReset"
+      ? "Код для сброса пароля"
+      : "Код для подтверждения регистрации";
+  const text =
+    type === "passwordReset"
+      ? `Ваш код для сброса пароля: ${code}. Если вы не запрашивали сброс пароля, просто игнорируйте это письмо.`
+      : `Ваш код для подтверждения регистрации: ${code}. Если вы не запрашивали регистрацию, просто игнорируйте это письмо.`;
+
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: email,
-    subject: 'Код для подтверждения регистрации',
-    text: `Ваш код для подтверждения регистрации: ${code}. Если вы не запрашивали регистрацию, просто игнорируйте это письмо.`,
+    subject,
+    text,
   };
 
-  await transporter.sendMail(mailOptions);
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`Verification email sent to ${email}`);
+  } catch (error) {
+    console.error(`Error sending verification email to ${email}:`, error);
+  }
 };
+
+// Helper function to generate verification code
+const generateVerificationCode = () =>
+  Math.floor(100000 + Math.random() * 900000).toString();
 
 app.use(express.json());
 app.use(cookieParser());
@@ -107,56 +123,77 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// Register Endpoint
 app.post("/register", async (req, res) => {
   const { fullName, nickName, email, password } = req.body;
   const verificationCode = generateVerificationCode();
+  const expirationTime = Date.now() + 120000; // 2 minutes
+
   try {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(422).json({ error: "Этот email уже зарегистрирован" });
+    }
+
+    // Store the verification code and expiration time in the temporary store
+    verificationStore.set(email, {
+      code: verificationCode,
+      expiration: expirationTime,
+    });
+
+    // Send verification email
+    await sendVerificationEmail(email, verificationCode, "register");
+
+    // Create a new user with verification set to false
     const userDoc = new User({
       fullName,
       nickName,
       email,
       password: bcrypt.hashSync(password, bcryptSalt),
-      resetToken: verificationCode,
-      resetTokenExpiration: Date.now() + 3600000, // 1 hour
+      verification: false,
     });
 
-    await sendVerificationEmail(email, verificationCode);
     await userDoc.save();
-    res.status(200).json({ message: 'Пользователь зарегистрирован, проверьте свою почту для верификации.', email });
+
+    res
+      .status(200)
+      .json({ message: "Проверьте свою почту для верификации.", email });
   } catch (error) {
     console.error("Ошибка в процессе регистрации:", error);
-    res.status(422).json(error);
+    res.status(500).json(error);
   }
 });
 
 // Verify Code Endpoint
 app.post("/verify-code", async (req, res) => {
   const { email, code } = req.body;
-  try {
-    const user = await User.findOne({
-      email,
-      resetToken: code,
-      resetTokenExpiration: { $gt: Date.now() },
-    });
+  const verificationData = verificationStore.get(email);
+  if (
+    !verificationData ||
+    verificationData.code !== code ||
+    verificationData.expiration < Date.now()
+  ) {
+    return res.status(400).json({ error: "Неверный или истекший код" });
+  }
 
+  try {
+    const user = await User.findOne({ email });
     if (!user) {
-      return res.status(400).json({ error: 'Неверный или истекший код' });
+      return res.status(404).json({ error: "Пользователь не найден" });
     }
 
-    user.resetToken = undefined;
-    user.resetTokenExpiration = undefined;
+    user.verification = true;
     await user.save();
+    verificationStore.delete(email);
 
     const token = jwt.sign(
       { email: user.email, id: user._id, name: user.fullName },
       jwtSecret
     );
 
-    res.status(200).json({ message: 'Код подтвержден', accessToken: token });
+    res.status(200).json({ message: "Код подтвержден", accessToken: token });
   } catch (err) {
     console.error("Ошибка при проверке кода верификации:", err);
-    res.status(500).json({ error: 'Ошибка при проверке кода верификации' });
+    res.status(500).json({ error: "Ошибка при проверке кода верификации" });
   }
 });
 
@@ -172,7 +209,9 @@ app.get("/profile", authMiddleware, async (req, res) => {
     res.json(user).status(200);
   } catch (err) {
     console.log(err);
-    res.status(500).json({ error: "Ошибка при получении профиля пользователя" });
+    res
+      .status(500)
+      .json({ error: "Ошибка при получении профиля пользователя" });
   }
 });
 
@@ -306,7 +345,7 @@ app.post("/findroommate-create", authMiddleware, async (req, res) => {
     whatsappNumber,
     whatsappNumberPreference,
     selectedGender,
-    communalServices
+    communalServices,
   } = req.body;
 
   try {
@@ -337,7 +376,7 @@ app.post("/findroommate-create", authMiddleware, async (req, res) => {
         whatsappNumber,
         whatsappNumberPreference,
         selectedGender,
-        communalServices
+        communalServices,
       });
       res.json(roommateDoc);
     } else {
@@ -370,7 +409,7 @@ app.put("/findroommate-update/:id", authMiddleware, async (req, res) => {
     whatsappNumber,
     whatsappNumberPreference,
     selectedGender,
-    communalServices
+    communalServices,
   } = req.body;
 
   try {
@@ -553,7 +592,9 @@ app.get("/findroommates", async (req, res) => {
   const { page = 1, limit = 40, search = "" } = req.query;
 
   try {
-    const query = search ? { title: { $regex: search, $options: "i" }, active: true } : { active: true };
+    const query = search
+      ? { title: { $regex: search, $options: "i" }, active: true }
+      : { active: true };
     const roommates = await FindRoommateModel.find(query)
       .skip((page - 1) * limit)
       .limit(Number(limit));
@@ -606,9 +647,13 @@ const fetchOpenAIData = async (prompt) => {
   while (retries > 0) {
     try {
       const openaiCompletion = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: "gpt-4-turbo",
         messages: [
-          { role: "system", content: "You are a professional job analyzer." },
+          {
+            role: "system",
+            content:
+              "You are a professional announcements analyzer. Your task is to find the most suitable announcements based on the user's criteria.",
+          },
           { role: "user", content: prompt },
         ],
         temperature: 0,
@@ -617,8 +662,8 @@ const fetchOpenAIData = async (prompt) => {
       let aiResponse = openaiCompletion.choices[0].message.content;
       console.log("AI Response:", aiResponse);
 
-      // Удаляем начальные и конечные символы ```json
-      aiResponse = aiResponse.replace(/```json/g, "").replace(/```/g, "");
+      // Remove JSON delimiters
+      aiResponse = aiResponse.replace(/json/g, "").replace(/```/g, "");
 
       return JSON.parse(aiResponse);
     } catch (apiError) {
@@ -652,11 +697,12 @@ app.get("/findroommates-search", authMiddleware, async (req, res) => {
 
     const announcements = await FindRoommateModel.find();
     const prompt = `
-      I will give you a user and announcements and you should analyze the announcements and find suitable announcements for the user.
-      Resources: User: ${JSON.stringify(
-        userAnceta
-      )}, Announcements: ${JSON.stringify(announcements)}.
-      The extra queries: ${query}. WARNING: RETURN JSON FORMAT ONLY FOR FOUND ANNOUNCEMENTS
+      You will be provided with a user's profile and a list of announcements. Your task is to find and return the most suitable announcements for the user based on the given profile and search query.
+      Resources:
+      User: ${JSON.stringify(userAnceta)},
+      Announcements: ${JSON.stringify(announcements)},
+      query: ${query}.
+      WARNING: RETURN JSON FORMAT ONLY FOR FOUND ANNOUNCEMENTS
     `;
 
     console.log("Prompt:", prompt);
@@ -672,16 +718,16 @@ app.get("/findroommates-search", authMiddleware, async (req, res) => {
             "OpenAI API quota exceeded. Please check your plan and billing details.",
         });
       } else {
-        res
-          .status(500)
-          .send({ message: "An error occurred while processing your request" });
+        res.status(500).send({
+          message: "An error occurred while processing your request",
+        });
       }
     }
   } catch (err) {
     console.error("Server error:", err);
-    res
-      .status(500)
-      .send({ message: "An error occurred while processing your request" });
+    res.status(500).send({
+      message: "An error occurred while processing your request",
+    });
   }
 });
 
@@ -743,84 +789,73 @@ app.delete("/delete-announcement/:id", authMiddleware, async (req, res) => {
 
 // Маршрут для запроса сброса пароля
 app.post("/request-reset-password", async (req, res) => {
-  const { email } = req.body;
+  const { email, type } = req.body; // Added `type` to distinguish between password reset and registration
   const verificationCode = generateVerificationCode();
+  const expirationTime = Date.now() + 120000; // 2 minutes
 
   try {
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(404).json({ error: 'Пользователь не найден' });
+      return res.status(404).json({ error: "Пользователь не найден" });
     }
 
-    user.resetToken = verificationCode;
-    user.resetTokenExpiration = Date.now() + 3600000; // 1 час
-    await user.save();
+    verificationStore.set(email, {
+      code: verificationCode,
+      expiration: expirationTime,
+    });
+    await sendVerificationEmail(email, verificationCode, type);
 
-    console.log(`User ${email} reset token: ${verificationCode}`);
-
-    await sendVerificationEmail(email, verificationCode);
-
-    res.status(200).json({ message: 'Код для сброса пароля отправлен на вашу почту' });
+    res
+      .status(200)
+      .json({ message: "Код для сброса пароля отправлен на вашу почту" });
   } catch (err) {
     res.status(500).json({ error: err });
   }
 });
 
-
-// Маршрут для верификации кода сброса пароля
+// Endpoint for verifying reset code
 app.post("/verify-reset-code", async (req, res) => {
   const { email, code } = req.body;
+  const verificationData = verificationStore.get(email);
 
-  try {
-    const user = await User.findOne({
-      email,
-      resetToken: code,
-      resetTokenExpiration: { $gt: Date.now() },
-    });
-    if (!user) {
-      return res.status(400).json({ error: 'Неверный или истекший код' });
-    }
-
-    res.status(200).json({ message: 'Код подтвержден' });
-  } catch (err) {
-    console.error("Ошибка при проверке кода сброса пароля:", err);
-    res.status(500).json({ error: 'Ошибка при проверке кода сброса пароля' });
+  if (
+    !verificationData ||
+    verificationData.code !== code ||
+    verificationData.expiration < Date.now()
+  ) {
+    return res.status(400).json({ error: "Неверный или истекший код" });
   }
+
+  res.status(200).json({ message: "Код подтвержден" });
 });
 
-
-// Маршрут для сброса пароля
-app.post('/reset-password', async (req, res) => {
+// Endpoint for resetting password
+app.post("/reset-password", async (req, res) => {
   const { email, code, newPassword } = req.body;
-
-  console.log(`Email: ${email}, Code: ${code}, New Password: ${newPassword}`);
+  const verificationData = verificationStore.get(email);
+  console.log(verificationData)
+  if (
+    !verificationData 
+  ) {
+    return res.status(400).json({ error: "Неверный или истекший код" });
+  }
 
   try {
-    const user = await User.findOne({
-      email,
-      resetToken: code,
-      resetTokenExpiration: { $gt: Date.now() },
-    });
-    console.log(user)
+    const user = await User.findOne({ email });
     if (!user) {
-      console.log("User not found or token expired");
-      console.log(`Expected token: ${code}, Current tokens: ${user ? user.resetToken : 'No user found'}`);
-      return res.status(400).json({ error: 'Неверный или истекший код' });
+      return res.status(404).json({ error: "Пользователь не найден" });
     }
-    
-    user.password = bcrypt.hashSync(newPassword, 10);
-    user.resetToken = undefined;
-    user.resetTokenExpiration = undefined;
-    await user.save();
 
-    res.status(200).json({ message: 'Пароль успешно сброшен' });
+    user.password = bcrypt.hashSync(newPassword, bcryptSalt);
+    await user.save();
+    verificationStore.delete(email);
+
+    res.status(200).json({ message: "Пароль успешно сброшен" });
   } catch (err) {
     console.error("Ошибка при сбросе пароля:", err);
-    res.status(500).json({ error: 'Ошибка при сбросе пароля' });
+    res.status(500).json({ error: "Ошибка при сбросе пароля" });
   }
 });
-
-
 
 app.listen(port, () => {
   console.log(`Сервер запущен на порту ${port}`);
