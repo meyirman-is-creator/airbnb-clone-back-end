@@ -106,11 +106,22 @@ app.post("/login", async (req, res) => {
     if (userDoc) {
       const passOk = bcrypt.compareSync(password, userDoc.password);
       if (passOk) {
+        if (!userDoc.verification) {
+          // Account not verified
+          const verificationCode = generateVerificationCode();
+          userDoc.refreshToken = verificationCode;
+          await userDoc.save();
+
+          await sendVerificationEmail(email, verificationCode, "register");
+
+          return res.status(403).json({ message: "Аккаунт не подтвержден. Новый код отправлен на вашу почту.", email });
+        }
+
         const token = jwt.sign(
-          { email: userDoc.email, id: userDoc._id, name: userDoc.name },
+          { email: userDoc.email, id: userDoc._id, name: userDoc.fullName },
           jwtSecret
         );
-        res.status(200).json({ accessToken: token });
+        res.status(200).json({ accessToken: token, userDoc });
       } else {
         res.status(422).json("Неверный пароль");
       }
@@ -122,6 +133,8 @@ app.post("/login", async (req, res) => {
     res.status(500).json("Ошибка сервера");
   }
 });
+
+
 
 app.post("/register", async (req, res) => {
   const { fullName, nickName, email, password } = req.body;
@@ -150,6 +163,7 @@ app.post("/register", async (req, res) => {
       email,
       password: bcrypt.hashSync(password, bcryptSalt),
       verification: false,
+      refreshToken: verificationCode,
     });
 
     await userDoc.save();
@@ -166,24 +180,19 @@ app.post("/register", async (req, res) => {
 // Verify Code Endpoint
 app.post("/verify-code", async (req, res) => {
   const { email, code } = req.body;
-  const verificationData = verificationStore.get(email);
-  if (
-    !verificationData ||
-    verificationData.code !== code ||
-    verificationData.expiration < Date.now()
-  ) {
-    return res.status(400).json({ error: "Неверный или истекший код" });
-  }
 
   try {
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({ error: "Пользователь не найден" });
     }
-
+    if (
+      user.refreshToken !== code
+    ) {
+      return res.status(400).json({ error: "Неверный код" });
+    }
     user.verification = true;
     await user.save();
-    verificationStore.delete(email);
 
     const token = jwt.sign(
       { email: user.email, id: user._id, name: user.fullName },
@@ -352,7 +361,7 @@ app.post("/findroommate-create", authMiddleware, async (req, res) => {
     const response = await axios.get(
       `https://catalog.api.2gis.com/3.0/items/geocode?q=${address}&fields=items.point&key=${process.env.TWOGIS_API}`
     );
-
+    
     if (response.data.result.items.length > 0) {
       const location = response.data.result.items[0].point;
       const coordinates = [location.lon, location.lat];
@@ -791,7 +800,6 @@ app.delete("/delete-announcement/:id", authMiddleware, async (req, res) => {
 app.post("/request-reset-password", async (req, res) => {
   const { email, type } = req.body; // Added `type` to distinguish between password reset and registration
   const verificationCode = generateVerificationCode();
-  const expirationTime = Date.now() + 120000; // 2 minutes
 
   try {
     const user = await User.findOne({ email });
@@ -799,19 +807,23 @@ app.post("/request-reset-password", async (req, res) => {
       return res.status(404).json({ error: "Пользователь не найден" });
     }
 
-    verificationStore.set(email, {
-      code: verificationCode,
-      expiration: expirationTime,
-    });
+    // Update the user's refreshToken with the new verification code
+    user.refreshToken = verificationCode;
+    await user.save();
+
+    // Send verification email
     await sendVerificationEmail(email, verificationCode, type);
 
-    res
-      .status(200)
-      .json({ message: "Код для сброса пароля отправлен на вашу почту" });
+    res.status(200).json({
+      message: "Код для сброса пароля отправлен на вашу почту",
+      verificationCode,
+    });
   } catch (err) {
-    res.status(500).json({ error: err });
+    console.error("Ошибка при запросе сброса пароля:", err);
+    res.status(500).json({ error: "Ошибка при запросе сброса пароля" });
   }
 });
+
 
 // Endpoint for verifying reset code
 app.post("/verify-reset-code", async (req, res) => {
@@ -831,14 +843,9 @@ app.post("/verify-reset-code", async (req, res) => {
 
 // Endpoint for resetting password
 app.post("/reset-password", async (req, res) => {
-  const { email, code, newPassword } = req.body;
-  const verificationData = verificationStore.get(email);
-  console.log(verificationData)
-  if (
-    !verificationData 
-  ) {
-    return res.status(400).json({ error: "Неверный или истекший код" });
-  }
+  const { email, newPassword } = req.body;
+
+  
 
   try {
     const user = await User.findOne({ email });
